@@ -1,6 +1,6 @@
 # ISSUE-003 — FTS5: highlighting rescans output prefixes
 
-State: Hold
+State: Implementing
 Mode: Pull request
 Target: New pull request
 Location: Not published.
@@ -62,27 +62,32 @@ Finish once and transfer or free the result through one explicit lifecycle while
 
 ## Missing
 
-- Pending baseline benchmark with variance and correctness guard.
-- Pending isolated candidate measurement against the fixed schema.
-- Pending focused checks for the changed lifecycle.
-- Pending commit.
-- Pending push.
-- Pending exact pull-request draft.
-- SQLite submission agreement remains required for external pull-request submission.
+- Pending candidate correction, focused checks, performance measurements, commit, push, and final draft update.
+- SQLite submission agreement remains required before external submission.
 
 ## Resume
 
-Index: Build highlight harness
-Next: Build and freeze the documented evaluator on the contribution base.
-Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
+Index: Implement builder patch
+Next: Implement the bounded correction on the authorized contribution branch.
+Done when: The branch contains only the scoped source change and is ready for candidate validation.
+
+## Implementation
+
+Branch: `perf/fts5-highlight-builder`
+Base: `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`
+Scope: Replace repeated highlight prefix reconstruction with one owned `sqlite3_str` builder.
+Commit: Pending.
+Push: Pending.
+Checks:
+- Baseline-vs-baseline evaluator control → passed at all six match counts with byte-identical dumps.
 
 ## Performance evidence
 
-Workload: Synthetic evaluator defined below; real-world representativeness is not established.
-Baseline [N]: Not measured.
+Workload: Synthetic repeated-highlight evaluator; real-world representativeness is not established.
+Baseline [O]: The frozen evaluator completed all six match counts with deterministic, byte-identical dumps.
 Candidate [N]: No correction is implemented or measured.
-Guard [N]: Existing highlight and snippet output tests have not run for a candidate.
-Boundary [N]: Prefix-scan cost, allocations, realistic output sizes, and end-to-end impact remain unmeasured.
+Guard [N]: Existing highlight, snippet, and allocation-failure tests have not run for a candidate.
+Boundary [N]: Candidate speedup, allocations, realistic output sizes, and end-to-end impact remain unmeasured.
 
 ### Benchmark plan
 
@@ -107,3 +112,31 @@ Candidate ownership: the builder owns its allocation until `finish` transfers it
 Exercise `fts5aux`, `fts5af`, `fts5fault4`, and `fts5fault9` for output, OOM, and lifecycle guardrails.
 
 Stop: do not pursue if `perf record` attributes under 10% of realistic CPU cost to `fts5HighlightAppend()`/`strlen()`, or lifecycle complexity outweighs the gain.
+
+## Draft
+
+### Summary
+
+`fts5HighlightAppend()` rebuilds output with `sqlite3_mprintf("%z%.*s", ...)` for every fragment.
+This change gives each highlight operation one `sqlite3_str` builder and preserves exact rendered output.
+
+### Evidence
+
+- `ext/fts5/fts5_aux.c:138-147` routes every fragment through a new `%z` formatting call.
+- `src/printf.c:834-860` computes the accumulated `%z` length with `strlen()` before adopting the allocation.
+
+### Changes
+
+- Append fragments with their known byte lengths to one builder and finish it once.
+- Leave tokenization, match coalescing, snippet scoring, markers, and UTF-8 offsets unchanged.
+
+### Risks and boundaries
+
+- Every success and error path must finish, transfer, or free builder ownership exactly once.
+- The change is internal to FTS5 auxiliary rendering and does not alter public APIs or stored data.
+
+### Verification
+
+- Baseline-vs-baseline evaluator control — byte-identical dumps at all six match counts.
+
+I checked the relevant issues, comments, pull requests, and discussions; this pull request is not a duplicate.

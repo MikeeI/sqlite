@@ -1,6 +1,6 @@
 # ISSUE-002 — FTS5: snippet rescans phrase instances
 
-State: Hold
+State: Implementing
 Mode: Pull request
 Target: New pull request
 Location: Not published.
@@ -62,24 +62,32 @@ Preserve the current candidates, weights, adjustment, first-winning tie rule, an
 
 ## Missing
 
-- Pending: baseline benchmark, frozen evaluator, and deterministic correctness guard.
-- Pending: bounded candidate correction and measurements with variance.
-- Pending: focused checks, commit, push, and exact pull request draft.
-- Pending: SQLite submission agreement or other accepted submission path; external publication requires evidence and exact user approval.
+- Pending candidate correction, focused checks, performance measurements, commit, push, and final draft update.
+- SQLite submission agreement or another accepted submission path remains required.
 
 ## Resume
 
-Index: Build snippet harness
-Next: Build and freeze the documented evaluator on the contribution base.
-Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
+Index: Implement scoring patch
+Next: Implement the bounded correction on the authorized contribution branch.
+Done when: The branch contains only the scoped source change and is ready for candidate validation.
+
+## Implementation
+
+Branch: `perf/fts5-snippet-scoring`
+Base: `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`
+Scope: Eliminate repeated snippet-candidate rescans while preserving exact scoring and output.
+Commit: Pending.
+Push: Pending.
+Checks:
+- Baseline-vs-baseline evaluator control → passed at all six instance counts with byte-identical dumps.
 
 ## Performance evidence
 
-Workload: Synthetic evaluator defined below; real-world representativeness is not established.
-Baseline [N]: Not measured.
+Workload: Synthetic repeated-match evaluator; real-world representativeness is not established.
+Baseline [O]: The frozen evaluator completed all six instance counts with deterministic, byte-identical dumps.
 Candidate [N]: No correction is implemented or measured.
-Guard [N]: Existing output and corruption tests have not run for a candidate.
-Boundary [N]: CPU cost, allocations, realistic instance counts, and end-to-end impact remain unmeasured.
+Guard [N]: Existing output, corruption, and allocation-failure tests have not run for a candidate.
+Boundary [N]: Candidate speedup, allocations, realistic instance counts, and end-to-end impact remain unmeasured.
 
 ### Benchmark plan
 
@@ -95,3 +103,31 @@ Reportability [N]: require >=50% cycle reduction, scaling exponent <=1.25, and h
 Correctness guardrails: normal results must be byte-identical and preserve first-winning ties across multiple phrases and columns, equal scores, sentence starts, token limits `0/1/32/64`, and locale/trigram cases.
 Failure guardrails: preserve corruption, OOM, and first-error behavior; include `fts5af` and `fts5corrupt3`.
 Stop: do not pursue publication if baseline scaling is effectively linear or realistic cardinality is not costly.
+
+## Draft
+
+### Summary
+
+`fts5SnippetFunction()` repeatedly scans phrase instances while scoring candidate windows.
+This change scores the same candidates with monotonic state while preserving exact snippet selection and rendering.
+
+### Evidence
+
+- `ext/fts5/fts5_aux.c:383-392` enumerates all instances for each score call.
+- `ext/fts5/fts5_aux.c:487-528` invokes that scoring path for each matching instance.
+
+### Changes
+
+- Reuse monotonic per-column scoring state instead of rescanning all phrase instances for every candidate.
+- Preserve the existing candidates, score weights, adjustment, first-winning tie rule, and output bytes.
+
+### Risks and boundaries
+
+- Corruption, allocation failure, sentence bias, locale, and first-error behavior must remain unchanged.
+- The change does not alter public FTS5 APIs or promote internal instance order into a public contract.
+
+### Verification
+
+- Baseline-vs-baseline evaluator control — byte-identical dumps at all six instance counts.
+
+I checked the relevant issues, comments, pull requests, and discussions; this pull request is not a duplicate.

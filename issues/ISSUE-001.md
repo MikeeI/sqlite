@@ -1,6 +1,6 @@
 # ISSUE-001 — window: first_value retains partition rows
 
-State: Hold
+State: Implementing
 Mode: Pull request
 Target: New pull request
 Location: Not published.
@@ -58,22 +58,33 @@ Allow returned rows to be deleted when no coalesced window function or frame rul
 
 ## Missing
 
-- Pending baseline benchmark, candidate correction, focused checks, commit, push, and exact pull-request draft.
+- Pending candidate correction, focused checks, performance measurements, commit, push, and final draft update.
 - SQLite submission agreement remains required before submission.
 
 ## Resume
 
-Index: Build retention harness
-Next: Build and freeze the documented evaluator on the contribution base.
-Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
+Index: Implement retention patch
+Next: Implement the bounded correction on the authorized contribution branch.
+Done when: The branch contains only the scoped source change and is ready for candidate validation.
+
+## Implementation
+
+Branch: `perf/window-first-value-retention`
+Base: `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`
+Scope: Bound retained rows for eligible unbounded-start `first_value()` frames without changing SQL results.
+Commit: Pending.
+Push: Pending.
+Checks:
+- Baseline-vs-baseline evaluator control → passed for all five sizes with identical payload guards.
 
 ## Performance evidence
 
-Workload: Synthetic evaluator defined below; real-world representativeness is not established.
-Baseline [N]: Not measured.
+Workload: Synthetic single-partition evaluator; real-world representativeness is not established.
+Baseline [O]: Peak memory delta rose from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
+Baseline [O]: The plan had no independent sorter and every expected-payload guard passed.
 Candidate [N]: No correction is implemented or measured.
 Guard [N]: Existing result-equivalence and fault tests have not run for a candidate.
-Boundary [N]: Peak ephemeral storage, temp I/O, latency, and end-to-end impact remain unmeasured.
+Boundary [N]: Temp I/O, end-to-end impact, and realistic workload frequency remain unmeasured.
 
 ### Benchmark plan
 
@@ -92,3 +103,31 @@ Acceptance [N]: report only if the candidate reduces the 1m peak delta by >=80%,
 Exponent [N]: ordinary-least-squares slope of `log2(max(1, median peak delta))` against `log2(N)` across the five N values.
 Guards [N]: compare `ROWS`, `RANGE`, and `GROUPS`; empty and `NULL` frames; `EXCLUDE`; mixed `nth_value()`, `lead()`, and `lag()`; then `window3`, `windowfault`, and `devtest`.
 Stop [N]: stop rather than report if baseline memory scaling is outside 0.75–1.25, EQP shows an independent sorter, or another SQLite connection confounds the status counter.
+
+## Draft
+
+### Summary
+
+`windowCacheFrame()` retains partition rows whenever the fast path includes `first_value()`.
+This change bounds retention for eligible unbounded-start frames while preserving other window-function semantics.
+
+### Evidence
+
+- `src/window.c:2029-2042` classifies every `first_value()` window as requiring cached rows.
+- The fixed baseline evaluator grew from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
+
+### Changes
+
+- Preserve the first-value state needed by the eligible fast path without retaining every returned row.
+- Leave `EXCLUDE`, bounded starts, and other random-access window functions unchanged.
+
+### Risks and boundaries
+
+- Results must remain identical for frame types, peers, empty frames, `NULL`, and mixed window functions.
+- The change is internal to window execution and does not alter public APIs or file formats.
+
+### Verification
+
+- Baseline-vs-baseline evaluator control — identical payload guards at all five row counts.
+
+I checked the relevant issues, comments, pull requests, and discussions; this pull request is not a duplicate.
