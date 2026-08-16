@@ -1381,6 +1381,22 @@ int sqlite3WindowCompare(
 
 
 /*
+** Return true if first_value() can retain its first argument instead of
+** reading it from the ephemeral table. The exact ROWS frame contains the
+** partition's first row in every output frame. regApp+1 records whether an
+** argument has been stepped, independently of whether that argument is NULL.
+*/
+static int windowFirstValueCanStream(Window *pWin){
+  return pWin->pWFunc->zName==first_valueName
+      && pWin->eFrmType==TK_ROWS
+      && pWin->eStart==TK_UNBOUNDED
+      && pWin->eEnd==TK_CURRENT
+      && pWin->eExclude==0;
+}
+
+static int windowCacheFrame(Window*);
+
+/*
 ** This is called by code in select.c before it calls sqlite3WhereBegin()
 ** to begin iterating through the sub-query results. It is used to allocate
 ** and initialize registers and cursors used by sqlite3WindowCodeStep().
@@ -1450,11 +1466,14 @@ void sqlite3WindowCodeInit(Parse *pParse, Select *pSelect){
       sqlite3VdbeAddOp2(v, OP_Integer, 0, pWin->regApp+1);
     }
     else if( p->zName==nth_valueName || p->zName==first_valueName ){
-      /* Allocate two registers at pWin->regApp. These will be used to
-      ** store the start and end index of the current frame.  */
+      /* Allocate two registers at pWin->regApp for the current frame's
+      ** start and end indexes. A streaming first_value() also stores its
+      ** first argument in regApp+2 if the frame is not cached. */
       pWin->regApp = pParse->nMem+1;
       pWin->csrApp = pParse->nTab++;
-      pParse->nMem += 2;
+      pParse->nMem += 2
+                    + (windowFirstValueCanStream(pWin)
+                    && !windowCacheFrame(pMWin));
       sqlite3VdbeAddOp2(v, OP_OpenDup, pWin->csrApp, pMWin->iEphCsr);
     }
     else if( p->zName==leadName || p->zName==lagName ){
@@ -1721,6 +1740,15 @@ static void windowAggStep(
            || pFunc->zName==first_valueName
       );
       assert( bInverse==0 || bInverse==1 );
+      if( bInverse==0
+       && windowFirstValueCanStream(pWin)
+       && windowCacheFrame(pMWin)==0
+      ){
+        int addr = sqlite3VdbeAddOp3(v, OP_IfPos, pWin->regApp+1, 0, 0);
+        VdbeCoverage(v);
+        sqlite3VdbeAddOp2(v, OP_Copy, regArg, pWin->regApp+2);
+        sqlite3VdbeJumpHere(v, addr);
+      }
       sqlite3VdbeAddOp2(v, OP_AddImm, pWin->regApp+1-bInverse, 1);
     }else if( pFunc->xSFunc!=noopStepFunc ){
       if( pWin->bExprArgs ){
@@ -1930,8 +1958,11 @@ static void windowReturnOneRow(WindowCodeArg *p){
     for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
       FuncDef *pFunc = pWin->pWFunc;
       assert( ExprUseXList(pWin->pOwner) );
-      if( pFunc->zName==nth_valueName
-       || pFunc->zName==first_valueName
+      if( windowFirstValueCanStream(pWin) && windowCacheFrame(pMWin)==0 ){
+        sqlite3VdbeAddOp2(v, OP_Copy, pWin->regApp+2, pWin->regResult);
+      }
+      else if( pFunc->zName==nth_valueName
+            || pFunc->zName==first_valueName
       ){
         int csr = pWin->csrApp;
         int lbl = sqlite3VdbeMakeLabel(pParse);
@@ -2008,6 +2039,9 @@ static int windowInitAccum(Parse *pParse, Window *pMWin){
       if( pFunc->zName==nth_valueName || pFunc->zName==first_valueName ){
         sqlite3VdbeAddOp2(v, OP_Integer, 0, pWin->regApp);
         sqlite3VdbeAddOp2(v, OP_Integer, 0, pWin->regApp+1);
+        if( windowFirstValueCanStream(pWin) && windowCacheFrame(pMWin)==0 ){
+          sqlite3VdbeAddOp2(v, OP_Null, 0, pWin->regApp+2);
+        }
       }
 
       if( (pFunc->funcFlags & SQLITE_FUNC_MINMAX) && pWin->csrApp ){
@@ -2032,7 +2066,7 @@ static int windowCacheFrame(Window *pMWin){
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
     FuncDef *pFunc = pWin->pWFunc;
     if( (pFunc->zName==nth_valueName)
-     || (pFunc->zName==first_valueName)
+     || (pFunc->zName==first_valueName && !windowFirstValueCanStream(pWin))
      || (pFunc->zName==leadName)
      || (pFunc->zName==lagName)
     ){
@@ -2447,6 +2481,145 @@ static int windowExprGtZero(Parse *pParse, Expr *pExpr){
 }
 
 /*
+** Return true if pMWin can process each row without the ephemeral table.
+** This is restricted to a coalesced group containing an eligible
+** first_value() and no function that requires random row access.
+*/
+static int windowFirstValueCanAvoidBuffer(Window *pMWin){
+  Window *pWin;
+  if( windowCacheFrame(pMWin) ) return 0;
+  for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
+    if( windowFirstValueCanStream(pWin) ) return 1;
+  }
+  return 0;
+}
+
+/*
+** Step and return the one buffered row using a pseudo cursor. The rewritten
+** SELECT only reads Window.iEphCsr with OP_Column, which is the interface
+** supported by an OP_OpenPseudo cursor.
+*/
+static void windowReturnBufferedFirstValue(
+  WindowCodeArg *p,
+  int regRecord,
+  int nInput
+){
+  Vdbe *v = p->pVdbe;
+  sqlite3VdbeAddOp1(v, OP_Close, p->pMWin->iEphCsr);
+  sqlite3VdbeAddOp3(v, OP_OpenPseudo, p->pMWin->iEphCsr, regRecord, nInput);
+  windowAggStep(p, p->pMWin, p->pMWin->iEphCsr, 0, p->regArg);
+  windowAggFinal(p, 0);
+  windowReturnOneRow(p);
+}
+
+/*
+** Generate direct code for the frame accepted by
+** windowFirstValueCanAvoidBuffer(). The generic ephemeral table's page cache
+** retains pages after OP_Delete, so deleting returned rows does not bound its
+** allocator high-water mark. This path keeps one input record in a VDBE
+** register and preserves the generic path's one-row output delay.
+*/
+static int windowCodeStepFirstValue(
+  Parse *pParse,
+  Select *p,
+  WhereInfo *pWInfo,
+  int regGosub,
+  int addrGosub
+){
+  Window *pMWin = p->pWin;
+  Vdbe *v = sqlite3GetVdbe(pParse);
+  int csrInput = p->pSrc->a[0].iCursor;
+  int nInput = p->pSrc->a[0].pSTab->nCol;
+  int regNew;
+  int regRecord;
+  int regCurrent;
+  int regInit;
+  int addrInit;
+  int addrGoto;
+  int addrOnce;
+  int i;
+  Window *pWin;
+  WindowCodeArg s;
+
+  if( !windowFirstValueCanAvoidBuffer(pMWin) ) return 0;
+  assert( pMWin->eFrmType==TK_ROWS );
+  assert( pMWin->eStart==TK_UNBOUNDED );
+  assert( pMWin->eEnd==TK_CURRENT );
+  assert( pMWin->eExclude==0 );
+
+  memset(&s, 0, sizeof(WindowCodeArg));
+  s.pParse = pParse;
+  s.pMWin = pMWin;
+  s.pVdbe = v;
+  s.regGosub = regGosub;
+  s.addrGosub = addrGosub;
+
+  regNew = pParse->nMem+1;
+  pParse->nMem += nInput;
+  regRecord = ++pParse->nMem;
+  regCurrent = ++pParse->nMem;
+  regInit = ++pParse->nMem;
+  addrGoto = sqlite3VdbeAddOp0(v, OP_Goto);
+  addrInit = sqlite3VdbeCurrentAddr(v);
+  s.regArg = windowInitAccum(pParse, pMWin);
+  sqlite3VdbeAddOp1(v, OP_Return, regInit);
+  sqlite3VdbeJumpHere(v, addrGoto);
+
+  for(i=0; i<nInput; i++){
+    sqlite3VdbeAddOp3(v, OP_Column, csrInput, i, regNew+i);
+  }
+  sqlite3VdbeAddOp3(v, OP_MakeRecord, regNew, nInput, regRecord);
+
+  addrOnce = sqlite3VdbeAddOp0(v, OP_Once);
+  for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
+    if( pWin->csrApp ) sqlite3VdbeAddOp1(v, OP_Close, pWin->csrApp);
+  }
+  for(i=3; i>=0; i--){
+    sqlite3VdbeAddOp1(v, OP_Close, pMWin->iEphCsr+i);
+  }
+  sqlite3VdbeJumpHere(v, addrOnce);
+
+  if( pMWin->pPartition ){
+    int regNewPart = regNew + pMWin->nBufferCol;
+    int lblSame = sqlite3VdbeMakeLabel(pParse);
+    int lblFlushed = sqlite3VdbeMakeLabel(pParse);
+    windowIfNewPeer(
+        pParse, pMWin->pPartition, regNewPart, pMWin->regPart, lblSame
+    );
+    sqlite3VdbeAddOp3(v, OP_If, pMWin->regOne, lblFlushed, 0);
+    VdbeCoverage(v);
+    windowReturnBufferedFirstValue(&s, regCurrent, nInput);
+    sqlite3VdbeResolveLabel(v, lblFlushed);
+    sqlite3VdbeAddOp2(v, OP_Integer, 1, pMWin->regOne);
+    sqlite3VdbeResolveLabel(v, lblSame);
+  }
+
+  {
+    int lblCurrent = sqlite3VdbeMakeLabel(pParse);
+    int lblStore = sqlite3VdbeMakeLabel(pParse);
+    sqlite3VdbeAddOp3(v, OP_IfNot, pMWin->regOne, lblCurrent, 1);
+    VdbeCoverage(v);
+    sqlite3VdbeAddOp2(v, OP_Gosub, regInit, addrInit);
+    sqlite3VdbeAddOp2(v, OP_Integer, 0, pMWin->regOne);
+    sqlite3VdbeAddOp2(v, OP_Goto, 0, lblStore);
+    sqlite3VdbeResolveLabel(v, lblCurrent);
+    windowReturnBufferedFirstValue(&s, regCurrent, nInput);
+    sqlite3VdbeResolveLabel(v, lblStore);
+  }
+  sqlite3VdbeAddOp3(v, OP_Move, regRecord, regCurrent, 1);
+  sqlite3WhereEnd(pWInfo);
+
+  {
+    int lblDone = sqlite3VdbeMakeLabel(pParse);
+    sqlite3VdbeAddOp3(v, OP_If, pMWin->regOne, lblDone, 0);
+    VdbeCoverage(v);
+    windowReturnBufferedFirstValue(&s, regCurrent, nInput);
+    sqlite3VdbeResolveLabel(v, lblDone);
+  }
+  return 1;
+}
+
+/*
 ** sqlite3WhereBegin() has already been called for the SELECT statement
 ** passed as the second argument when this function is invoked. It generates
 ** code to populate the Window.regResult register for each window function
@@ -2808,6 +2981,10 @@ void sqlite3WindowCodeStep(
   int lblWhereEnd;                /* Label just before sqlite3WhereEnd() code */
   int regStart = 0;               /* Value of <expr> PRECEDING */
   int regEnd = 0;                 /* Value of <expr> FOLLOWING */
+
+  if( windowCodeStepFirstValue(pParse, p, pWInfo, regGosub, addrGosub) ){
+    return;
+  }
 
   assert( pMWin->eStart==TK_PRECEDING || pMWin->eStart==TK_CURRENT
        || pMWin->eStart==TK_FOLLOWING || pMWin->eStart==TK_UNBOUNDED
