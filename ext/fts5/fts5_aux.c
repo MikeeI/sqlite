@@ -364,26 +364,32 @@ static int fts5SnippetScore(
   int nDocsize,                   /* Size of column in tokens */
   unsigned char *aSeen,           /* Array with one element per query phrase */
   int iCol,                       /* Column to score */
+  int iInst,                      /* First instance at or after iPos */
+  int nInst,                      /* Total number of instances */
   int iPos,                       /* Starting offset to score */
   int nToken,                     /* Max tokens per snippet */
   int *pnScore,                   /* OUT: Score */
   int *piPos                      /* OUT: Adjusted offset */
 ){
-  int rc;
+  int rc = SQLITE_OK;
   int i;
   int ip = 0;
   int ic = 0;
   int iOff = 0;
   int iFirst = -1;
-  int nInst;
   int nScore = 0;
   int iLast = 0;
   sqlite3_int64 iEnd = (sqlite3_int64)iPos + nToken;
 
-  rc = pApi->xInstCount(pFts, &nInst);
-  for(i=0; i<nInst && rc==SQLITE_OK; i++){
+  /*
+  ** The internal xInst() cache is ordered by column and then token offset.
+  ** Therefore no instance after the first outside this window can contribute.
+  */
+  for(i=iInst; i<nInst && rc==SQLITE_OK; i++){
     rc = pApi->xInst(pFts, i, &ip, &ic, &iOff);
-    if( rc==SQLITE_OK && ic==iCol && iOff>=iPos && iOff<iEnd ){
+    if( rc==SQLITE_OK ){
+      if( ic!=iCol || iOff>=iEnd ) break;
+      assert( iOff>=iPos );
       nScore += (aSeen[ip] ? 1 : 1000);
       aSeen[ip] = 1;
       if( iFirst<0 ) iFirst = iOff;
@@ -428,6 +434,7 @@ static void fts5SnippetFunction(
   const char *zEllips;            /* 4th argument to snippet() */
   i64 nToken;                     /* 5th argument to snippet() */
   int nInst = 0;                  /* Number of instance matches this row */
+  int iInst = 0;                  /* Next instance index to process */
   int i;                          /* Used to iterate through instances */
   int nPhrase;                    /* Number of phrases in query */
   unsigned char *aSeen;           /* Array of "seen instance" flags */
@@ -471,6 +478,10 @@ static void fts5SnippetFunction(
       int nDoc;
       int nDocsize;
       int ii;
+      int iFirst = -1;            /* First instance at current sentence */
+      int iMatch = -1;            /* First instance at current offset */
+      int iMatchPos = -1;         /* Offset of iMatch */
+      int jj = 0;                 /* Current sentence */
       sFinder.iPos = 0;
       sFinder.nFirst = 0;
       rc = pApi->xColumnText(pFts, i, &sFinder.zDoc, &nDoc);
@@ -484,19 +495,38 @@ static void fts5SnippetFunction(
       rc = pApi->xColumnSize(pFts, i, &nDocsize);
       if( rc!=SQLITE_OK ) break;
 
-      for(ii=0; rc==SQLITE_OK && ii<nInst; ii++){
+      /*
+      ** xInst() entries are ordered by column, so skip instances belonging to
+      ** earlier columns and leave the first instance of the next column for
+      ** its iteration.
+      */
+      while( iInst<nInst && rc==SQLITE_OK ){
+        int ip, ic, io;
+        rc = pApi->xInst(pFts, iInst, &ip, &ic, &io);
+        if( rc!=SQLITE_OK || ic>=i ) break;
+        iInst++;
+      }
+
+      for(ii=iInst; rc==SQLITE_OK && ii<nInst; ii++){
         int ip, ic, io;
         int iAdj;
         int nScore;
-        int jj;
 
         rc = pApi->xInst(pFts, ii, &ip, &ic, &io);
-        if( ic!=i ) continue;
-        if( io>nDocsize ) rc = FTS5_CORRUPT;
-        if( rc!=SQLITE_OK ) continue;
+        if( rc!=SQLITE_OK || ic!=i ) break;
+        if( io>nDocsize ){
+          rc = FTS5_CORRUPT;
+          continue;
+        }
+        if( iMatchPos!=io ){
+          iMatch = ii;
+          iMatchPos = io;
+        }
+        if( iFirst<0 ) iFirst = ii;
+
         memset(aSeen, 0, nPhrase);
-        rc = fts5SnippetScore(pApi, pFts, nDocsize, aSeen, i,
-            io, nToken, &nScore, &iAdj
+        rc = fts5SnippetScore(pApi, pFts, nDocsize, aSeen, i, iMatch,
+            nInst, io, nToken, &nScore, &iAdj
         );
         if( rc==SQLITE_OK && nScore>nBestScore ){
           nBestScore = nScore;
@@ -506,26 +536,36 @@ static void fts5SnippetFunction(
         }
 
         if( rc==SQLITE_OK && sFinder.nFirst && nDocsize>nToken ){
-          for(jj=0; jj<(sFinder.nFirst-1); jj++){
-            if( sFinder.aFirst[jj+1]>io ) break;
+          while( jj<(sFinder.nFirst-1) && sFinder.aFirst[jj+1]<=io ){
+            jj++;
           }
 
           if( sFinder.aFirst[jj]<io ){
-            memset(aSeen, 0, nPhrase);
-            rc = fts5SnippetScore(pApi, pFts, nDocsize, aSeen, i, 
-              sFinder.aFirst[jj], nToken, &nScore, 0
-            );
+            while( iFirst<ii ){
+              int ip2, ic2, io2;
+              rc = pApi->xInst(pFts, iFirst, &ip2, &ic2, &io2);
+              if( rc!=SQLITE_OK || io2>=sFinder.aFirst[jj] ) break;
+              iFirst++;
+            }
 
-            nScore += (sFinder.aFirst[jj]==0 ? 120 : 100);
-            if( rc==SQLITE_OK && nScore>nBestScore ){
-              nBestScore = nScore;
-              iBestCol = i;
-              iBestStart = sFinder.aFirst[jj];
-              nColSize = nDocsize;
+            if( rc==SQLITE_OK ){
+              memset(aSeen, 0, nPhrase);
+              rc = fts5SnippetScore(pApi, pFts, nDocsize, aSeen, i, iFirst,
+                  nInst, sFinder.aFirst[jj], nToken, &nScore, 0
+              );
+
+              nScore += (sFinder.aFirst[jj]==0 ? 120 : 100);
+              if( rc==SQLITE_OK && nScore>nBestScore ){
+                nBestScore = nScore;
+                iBestCol = i;
+                iBestStart = sFinder.aFirst[jj];
+                nColSize = nDocsize;
+              }
             }
           }
         }
       }
+      iInst = ii;
     }
   }
 
