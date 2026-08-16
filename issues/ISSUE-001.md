@@ -1,8 +1,8 @@
 # ISSUE-001 — window: first_value retains partition rows
 
 State: Hold
-Mode: Undecided
-Target: Undecided
+Mode: Pull request
+Target: New pull request
 Location: Not published.
 Priority: High
 Confidence: Medium
@@ -37,7 +37,7 @@ Forum [S]: https://sqlite.org/forum/forumpost/c65d4d2431d285585968cf7210fc7acb76
 Fossil [S]: https://sqlite.org/src/info/e7a91f12282afb5d5d7d78397a11d18e0268ee0c931d85e21fce00d13929494e — Related cache-reduction history.
 Fossil [S]: https://sqlite.org/src/info/6ad553192051eaa0c6d929baacde2de07b93c6d09de861028bbce55a2c9bfdd3 — Related cache-reduction history.
 Gaps: Coverage does not claim exhaustive absence; representative measurements and a candidate remain required.
-Target fit: Undecided — recommend a new SQLite Bug Forum thread only after measurements; retain Undecided Target.
+Target fit: User selected a proof-of-concept New pull request; external publication remains contingent on evidence, approval of the exact target and draft, and SQLite's submission path.
 
 ## Direction
 
@@ -58,15 +58,14 @@ Allow returned rows to be deleted when no coalesced window function or frame rul
 
 ## Missing
 
-- Representative baseline and candidate measurements with variance and a correctness guard.
-- Target fit must be rechecked after measurements and immediately before drafting.
-- User-selected Mode and Target.
+- Pending baseline benchmark, candidate correction, focused checks, commit, push, and exact pull-request draft.
+- SQLite submission agreement remains required before submission.
 
 ## Resume
 
-Index: Benchmark partition retention
-Next: Define and run a large single-partition `first_value()` baseline on current `upstream/master`.
-Done when: Repeated runs record exact SQL, rows, latency, peak RSS, temp I/O, and variance.
+Index: Build retention harness
+Next: Build and freeze the documented evaluator on the contribution base.
+Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
 
 ## Performance evidence
 

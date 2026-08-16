@@ -1,8 +1,8 @@
 # ISSUE-003 — FTS5: highlighting rescans output prefixes
 
 State: Hold
-Mode: Undecided
-Target: Undecided
+Mode: Pull request
+Target: New pull request
 Location: Not published.
 Priority: High
 Confidence: Medium
@@ -41,7 +41,7 @@ Bounded searches, checked 2026-08-16: SQLite Bug Forum, User Forum, canonical Fo
 - Related builder/correctness history: https://sqlite.org/src/info/8f5e9c192ff2820d8cfb076ab28f30697d10c22710583d6c7fd7019c4a0ea795
 - No direct FTS5 highlight prefix-scan record was identified in bounded User Forum (https://sqlite.org/forum/) and `sqlite/sqlite` activity (https://github.com/sqlite/sqlite/commits/master) searches; this is not exhaustive.
 
-Target fit: consider a new SQLite Bug Forum thread only after reproducible measurements; Target remains Undecided.
+Target fit: User selected a proof-of-concept New pull request. External publication remains contingent on evidence, exact approval, and SQLite's submission path.
 
 ## Direction
 
@@ -62,15 +62,19 @@ Finish once and transfer or free the result through one explicit lifecycle while
 
 ## Missing
 
-- Representative baseline and candidate measurements with variance and a correctness guard.
-- A later currentness and target-fit recheck before choosing a target.
-- User-selected Mode and Target.
+- Pending baseline benchmark with variance and correctness guard.
+- Pending isolated candidate measurement against the fixed schema.
+- Pending focused checks for the changed lifecycle.
+- Pending commit.
+- Pending push.
+- Pending exact pull-request draft.
+- SQLite submission agreement remains required for external pull-request submission.
 
 ## Resume
 
-Index: Benchmark highlight appends
-Next: Define and run a high-match `highlight()` baseline on current `upstream/master`.
-Done when: Repeated runs record exact schema, data, query, append counts, output bytes, latency, and variance.
+Index: Build highlight harness
+Next: Build and freeze the documented evaluator on the contribution base.
+Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
 
 ## Performance evidence
 

@@ -13,9 +13,9 @@ Next finding ID: ISSUE-008
 
 | ID | Finding | State | Mode | Target | Priority | Next | Location |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| [ISSUE-001](issues/ISSUE-001.md) | window: first_value retains partition rows | Hold | Undecided | Undecided | High | Benchmark partition retention | Not published. |
-| [ISSUE-002](issues/ISSUE-002.md) | FTS5: snippet rescans phrase instances | Hold | Undecided | Undecided | High | Benchmark snippet scoring | Not published. |
-| [ISSUE-003](issues/ISSUE-003.md) | FTS5: highlighting rescans output prefixes | Hold | Undecided | Undecided | High | Benchmark highlight appends | Not published. |
+| [ISSUE-001](issues/ISSUE-001.md) | window: first_value retains partition rows | Hold | Pull request | New pull request | High | Build retention harness | Not published. |
+| [ISSUE-002](issues/ISSUE-002.md) | FTS5: snippet rescans phrase instances | Hold | Pull request | New pull request | High | Build snippet harness | Not published. |
+| [ISSUE-003](issues/ISSUE-003.md) | FTS5: highlighting rescans output prefixes | Hold | Pull request | New pull request | High | Build highlight harness | Not published. |
 | [ISSUE-004](issues/ISSUE-004.md) | vtab: busy close rolls back state | Hold | Undecided | Undecided | High | Probe private-vtab busy | Not published. |
 | [ISSUE-005](issues/ISSUE-005.md) | win: timed SHM lock skips completion collection | Hold | Undecided | Undecided | High | Reproduce timed SHM race | Not published. |
 | [ISSUE-006](issues/ISSUE-006.md) | CLI .restore: missing source can clear target | Hold | Undecided | Undecided | High | Review restore prior art | Not published. |

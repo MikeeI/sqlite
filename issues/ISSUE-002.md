@@ -1,8 +1,8 @@
 # ISSUE-002 — FTS5: snippet rescans phrase instances
 
 State: Hold
-Mode: Undecided
-Target: Undecided
+Mode: Pull request
+Target: New pull request
 Location: Not published.
 Priority: High
 Confidence: Medium
@@ -40,7 +40,7 @@ Coverage: SQLite Bug Forum, SQLite User Forum, canonical Fossil history, and `sq
 
 Gaps: No exhaustive absence claim; measurements and target fit remain unresolved.
 
-Target fit: Undecided — recommend a new SQLite Bug Forum thread only after measurements, if no same-root-cause thread emerges.
+Target fit: User selected a proof-of-concept New pull request. External publication remains contingent on benchmark and candidate evidence, exact user approval of the draft and target, and SQLite's submission path.
 
 ## Direction
 
@@ -51,7 +51,7 @@ Preserve the current candidates, weights, adjustment, first-winning tie rule, an
 ## Bounds
 
 - Preserve: output text, `1000/1` and `120/100` weights, ties, locale, corruption detection, OOM, and first error.
-- Exclude: `bm25()`, tokenizer behavior, generic extension API changes, and unrelated FTS5 query execution.
+- Exclude: `bm25()`, tokenizer behavior, generic FTS5 APIs, unrelated FTS5 query execution, and tracking files.
 - Cost: per-column state; the implementation must not promote internal `xInst()` ordering into a public guarantee.
 
 ## Verification
@@ -62,15 +62,16 @@ Preserve the current candidates, weights, adjustment, first-winning tie rule, an
 
 ## Missing
 
-- Representative baseline and candidate measurements with variance and a correctness guard.
-- Measurement-based target fit; no exhaustive absence claim.
-- User-selected Mode and Target.
+- Pending: baseline benchmark, frozen evaluator, and deterministic correctness guard.
+- Pending: bounded candidate correction and measurements with variance.
+- Pending: focused checks, commit, push, and exact pull request draft.
+- Pending: SQLite submission agreement or other accepted submission path; external publication requires evidence and exact user approval.
 
 ## Resume
 
-Index: Benchmark snippet scoring
-Next: Define and run a high-instance `snippet()` baseline on current `upstream/master`.
-Done when: Repeated runs record exact schema, data, query, instance counts, latency, and variance.
+Index: Build snippet harness
+Next: Build and freeze the documented evaluator on the contribution base.
+Done when: The baseline build emits deterministic guard output and the fixed measurement schema.
 
 ## Performance evidence
 
