@@ -1,11 +1,11 @@
 # ISSUE-001 — window: first_value retains partition rows
 
-State: Implementing
+State: Ready
 Mode: Pull request
 Target: New pull request
 Location: Not published.
 Priority: High
-Confidence: Medium
+Confidence: High
 Type: performance
 Created: 2026-08-15
 Updated: 2026-08-16
@@ -20,7 +20,7 @@ For an unbounded frame start, this prevents `WINDOW_RETURN_ROW` cleanup.
 
 Reach [S]: Built-in `first_value()` queries with no `EXCLUDE` clause and an unbounded frame start are affected.
 Impact [S]: The ephemeral table retains all rows read for the current partition instead of deleting returned rows.
-Impact [N]: Peak memory, temp-file I/O, latency, and real-world frequency are not measured.
+Impact [O]: A synthetic 1m-row case retained 295,223,440 bytes; realistic frequency and temp I/O remain unmeasured.
 
 ## Evidence
 
@@ -32,12 +32,14 @@ Impact [N]: Peak memory, temp-file I/O, latency, and real-world frequency are no
 
 ## Prior art
 
-Coverage [S]: SQLite Bug Forum and User Forum, canonical Fossil history, and `sqlite/sqlite` GitHub activity searched; checked 2026-08-16.
+Coverage [S]: SQLite forums, canonical Fossil history, and `sqlite/sqlite` GitHub activity were searched.
+The search was checked on 2026-08-16.
 Forum [S]: https://sqlite.org/forum/forumpost/c65d4d2431d285585968cf7210fc7acb76f38ad558db6d681e5c5698ae23acf9 — Distinct: huge `FOLLOWING`-bound runtime, not unbounded-start row retention.
 Fossil [S]: https://sqlite.org/src/info/e7a91f12282afb5d5d7d78397a11d18e0268ee0c931d85e21fce00d13929494e — Related cache-reduction history.
 Fossil [S]: https://sqlite.org/src/info/6ad553192051eaa0c6d929baacde2de07b93c6d09de861028bbce55a2c9bfdd3 — Related cache-reduction history.
-Gaps: Coverage does not claim exhaustive absence; representative measurements and a candidate remain required.
-Target fit: User selected a proof-of-concept New pull request; external publication remains contingent on evidence, approval of the exact target and draft, and SQLite's submission path.
+Gaps: Coverage does not claim exhaustive absence; representative workload frequency remains unresolved.
+Target fit: The user selected a proof-of-concept New pull request.
+Publication requires approval of the exact target and draft plus SQLite's accepted submission path.
 
 ## Direction
 
@@ -58,76 +60,99 @@ Allow returned rows to be deleted when no coalesced window function or frame rul
 
 ## Missing
 
-- Pending candidate correction, focused checks, performance measurements, commit, push, and final draft update.
-- SQLite submission agreement remains required before submission.
+- External publication awaits exact user approval and SQLite's accepted submission path.
 
 ## Resume
 
-Index: Implement retention patch
-Next: Implement the bounded correction on the authorized contribution branch.
-Done when: The branch contains only the scoped source change and is ready for candidate validation.
+Index: Approve exact pull request
+Next: Obtain approval for the exact target and draft below.
+Done when: The approved pull request is published and its URL is recorded.
 
 ## Implementation
 
 Branch: `perf/window-first-value-retention`
 Base: `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`
 Scope: Bound retained rows for eligible unbounded-start `first_value()` frames without changing SQL results.
-Commit: Pending.
-Push: Pending.
+Commit: `58af32584f`
+Push: `origin/perf/window-first-value-retention`
 Checks:
-- Baseline-vs-baseline evaluator control → passed for all five sizes with identical payload guards.
+- `./testfixture ../test/window3.test` → 0 errors.
+- `./testfixture ../test/windowfault.test` → 0 errors across 5,601 tests.
+- `sudo -u nobody env CCACHE_DISABLE=1 ./testfixture ../test/testrunner.tcl mdevtest` → 0 errors across 977,532 tests.
+- Fixed 15-pair benchmark → exact payload guards passed at all five sizes.
+- Contribution diff against the base contains only `src/window.c`.
 
 ## Performance evidence
 
 Workload: Synthetic single-partition evaluator; real-world representativeness is not established.
-Baseline [O]: Peak memory delta rose from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
-Baseline [O]: The plan had no independent sorter and every expected-payload guard passed.
-Candidate [N]: No correction is implemented or measured.
-Guard [N]: Existing result-equivalence and fault tests have not run for a candidate.
-Boundary [N]: Temp I/O, end-to-end impact, and realistic workload frequency remain unmeasured.
+Baseline [O]: Peak memory rose from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
+Candidate [O]: Peak memory was 2,072,480 bytes at every size; the 1m median ratio was 0.007020.
+Candidate [O]: The memory-scaling exponent changed from 0.885844 to 0.000000.
+Candidate [O]: At 1m rows, elapsed-time and cycle ratios were 0.447511 and 0.451618 respectively.
+Guard [O]: All expected-payload guards and existing window, fault-injection, and development tests passed.
+Boundary [N]: Temp I/O, representative workloads, and real-world frequency remain unmeasured.
 
 ### Benchmark plan
 
 Baseline: current Source commit `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`.
-Candidate: isolated worktree at that base with only the proposed unbounded-start `first_value()` retention correction.
-Environment: Ubuntu 24.04.4, AMD Ryzen 9 5950X, GCC 13.3.0; compile with `-O2 -DNDEBUG -g -fno-omit-frame-pointer`.
-Isolation: one fresh dedicated process and connection per sample, pinned with `taskset -c 4`; no concurrent SQLite work.
-Workload: temporary on-disk `t(id INTEGER PRIMARY KEY,payload BLOB)` with deterministic unique 256-byte payloads; N=10k,30k,100k,300k,1m.
+Candidate: commit `58af32584f` in an isolated worktree at the same base.
+Environment: Ubuntu 24.04.4, AMD Ryzen 9 5950X, GCC 13.3.0.
+Compilation used `-O2 -DNDEBUG -g -fno-omit-frame-pointer`.
+Isolation: each sample used a fresh process and connection pinned with `taskset -c 4`.
+Workload: an on-disk `t(id INTEGER PRIMARY KEY,payload BLOB)` held deterministic unique 256-byte payloads.
+The five row counts were 10k, 30k, 100k, 300k, and 1m.
 Settings: `PRAGMA temp_store=MEMORY; PRAGMA cache_size=-2048; PRAGMA mmap_size=0;`.
-SQL: `SELECT first_value(payload) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t WHERE id <= ?1;`.
-Plan [N]: setup and prepare are untimed; `?1` equals N; verify EQP has no independent sorter before every measured series.
-Primary [N]: reset `SQLITE_STATUS_MEMORY_USED` high-water immediately before stepping; record high-water minus current memory at reset.
-Protocol [N]: three warmups per build and N, then 15 paired samples alternating AB/BA (eight AB, seven BA), pinned to CPU 4.
-Analysis [N]: report median candidate/baseline ratio and MAD; collect `perf stat` counters and Max RSS as secondary measures.
-Acceptance [N]: report only if the candidate reduces the 1m peak delta by >=80%, has a <=0.25 memory-scaling exponent, regresses runtime by <=3%, and returns the exact expected payload for every row.
-Exponent [N]: ordinary-least-squares slope of `log2(max(1, median peak delta))` against `log2(N)` across the five N values.
-Guards [N]: compare `ROWS`, `RANGE`, and `GROUPS`; empty and `NULL` frames; `EXCLUDE`; mixed `nth_value()`, `lead()`, and `lag()`; then `window3`, `windowfault`, and `devtest`.
-Stop [N]: stop rather than report if baseline memory scaling is outside 0.75–1.25, EQP shows an independent sorter, or another SQLite connection confounds the status counter.
+SQL:
+`SELECT first_value(payload) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t WHERE id<=?1 ORDER BY id;`.
+Plan [O]: setup and prepare were untimed, and EQP showed no independent sorter.
+Primary [O]: the evaluator reset `SQLITE_STATUS_MEMORY_USED` high-water immediately before stepping.
+It recorded the high-water value minus current memory at reset.
+Protocol [O]: each build and size used three warmups and 15 paired AB/BA samples pinned to CPU 4.
+Analysis [O]: results use the median candidate/baseline ratio and MAD.
+`perf stat` counters and Max RSS were collected as secondary measures.
+Acceptance [O]: the 1m peak delta fell by at least 80%, and the scaling exponent was at most 0.25.
+Runtime did not regress, and every row returned the exact expected payload.
+Exponent: ordinary-least-squares slope of log2 median peak delta against log2 row count.
+Guards [O]: `window3`, `windowfault`, and `mdevtest` passed.
+Stop [O]: baseline memory scaling was within 0.75–1.25, and EQP showed no independent sorter.
 
 ## Draft
+
+Target: `sqlite/sqlite` — New pull request from `MikeeI:perf/window-first-value-retention`
+
+Title: Stream eligible first_value() window frames
+
+Body:
 
 ### Summary
 
 `windowCacheFrame()` retains partition rows whenever the fast path includes `first_value()`.
-This change bounds retention for eligible unbounded-start frames while preserving other window-function semantics.
+Eligibility is restricted to the exact `ROWS UNBOUNDED PRECEDING ... CURRENT ROW` case.
+The new path uses register-backed state and does not retain prior partition rows.
 
 ### Evidence
 
-- `src/window.c:2029-2042` classifies every `first_value()` window as requiring cached rows.
-- The fixed baseline evaluator grew from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
+- `src/window.c:windowCacheFrame()` classified every `first_value()` window as requiring cached rows.
+- A fixed synthetic evaluator grew from 5,165,632 bytes at 10k rows to 295,223,440 bytes at 1m rows.
+- The candidate used 2,072,480 bytes at every size; its 1m candidate/baseline median ratio was 0.007020.
+- Reproducible evaluator: https://github.com/MikeeI/sqlite/tree/personal/issues/evidence/ISSUE-001
 
 ### Changes
 
-- Preserve the first-value state needed by the eligible fast path without retaining every returned row.
-- Leave `EXCLUDE`, bounded starts, and other random-access window functions unchanged.
+- Stream eligible groups through one register-backed input record.
+- Retain the first value in VDBE registers.
+- Keep the generic buffered path for `EXCLUDE`, other frames, and any coalesced function requiring random row access.
 
 ### Risks and boundaries
 
-- Results must remain identical for frame types, peers, empty frames, `NULL`, and mixed window functions.
-- The change is internal to window execution and does not alter public APIs or file formats.
+- The specialized path preserves the existing one-row delay, partition reset, `NULL`, OOM, and result semantics.
+- The change is internal to window execution and does not alter public APIs, SQL syntax, or file formats.
 
 ### Verification
 
-- Baseline-vs-baseline evaluator control — identical payload guards at all five row counts.
+- `./testfixture ../test/window3.test` — 0 errors.
+- `./testfixture ../test/windowfault.test` — 0 errors across 5,601 tests.
+- `sudo -u nobody env CCACHE_DISABLE=1 ./testfixture ../test/testrunner.tcl mdevtest` — 0 errors across 977,532 tests.
+- Fixed 15-pair benchmark — exact payload guards passed at all five sizes; the 1m elapsed-time ratio was 0.447511.
 
 I checked the relevant issues, comments, pull requests, and discussions; this pull request is not a duplicate.
