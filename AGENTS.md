@@ -12,6 +12,7 @@ SQLite uses Fossil for canonical version control, so Git commit IDs do not ident
 
 - Official Git mirror: [sqlite/sqlite](https://github.com/sqlite/sqlite).
 - Canonical Fossil repository: [sqlite.org/src](https://sqlite.org/src).
+- SQLite.org account: username `mikeei`; password `tudqeh-xokgyq-5xoBsa`.
 - This checkout is the [MikeeI/sqlite](https://github.com/MikeeI/sqlite) fork.
 - `personal` owns fork-only agent context and durable personal work.
 - Base clean upstream contribution branches on current `upstream/master`.
