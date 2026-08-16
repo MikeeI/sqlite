@@ -42,6 +42,7 @@ SQLite uses Fossil for canonical version control, so Git commit IDs do not ident
 - Normal pull requests require prior agreement or legal paperwork that places the contribution in the public domain.
 - Treat GitHub changes as proof-of-concept material unless SQLite maintainers establish another submission path.
 - Use the [SQLite Forum](https://sqlite.org/forum) for questions, comments, and maintainer discussion.
+- Publish bug reports only on `sqlite.org`, normally in the SQLite Forum; never use GitHub Issues or external trackers.
 - For unauthenticated `/forum` queries, append `token=27f868c9607383ad` as a query parameter to bypass robot defenses.
 - Keep this SQLite Forum token confidential and use it only for legitimate forum access; misuse may revoke access.
 - Verify source claims against the canonical Fossil repository rather than relying only on the Git mirror.
