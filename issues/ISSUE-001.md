@@ -8,7 +8,7 @@ Priority: High
 Confidence: Medium
 Type: performance
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-16
 Source: `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`
 
 ## Root
@@ -32,10 +32,12 @@ Impact [N]: Peak memory, temp-file I/O, latency, and real-world frequency are no
 
 ## Prior art
 
-Coverage: local ledger IDs, titles, symptoms, root causes, and symbols; checked=2026-08-15.
-Gaps: Fossil history and tickets, SQLite Forum, GitHub activity, and release notes were not searched.
-
-Target fit: Undecided — representative measurements and external prior-art research are incomplete.
+Coverage [S]: SQLite Bug Forum and User Forum, canonical Fossil history, and `sqlite/sqlite` GitHub activity searched; checked 2026-08-16.
+Forum [S]: https://sqlite.org/forum/forumpost/c65d4d2431d285585968cf7210fc7acb76f38ad558db6d681e5c5698ae23acf9 — Distinct: huge `FOLLOWING`-bound runtime, not unbounded-start row retention.
+Fossil [S]: https://sqlite.org/src/info/e7a91f12282afb5d5d7d78397a11d18e0268ee0c931d85e21fce00d13929494e — Related cache-reduction history.
+Fossil [S]: https://sqlite.org/src/info/6ad553192051eaa0c6d929baacde2de07b93c6d09de861028bbce55a2c9bfdd3 — Related cache-reduction history.
+Gaps: Coverage does not claim exhaustive absence; representative measurements and a candidate remain required.
+Target fit: Undecided — recommend a new SQLite Bug Forum thread only after measurements; retain Undecided Target.
 
 ## Direction
 
@@ -57,7 +59,7 @@ Allow returned rows to be deleted when no coalesced window function or frame rul
 ## Missing
 
 - Representative baseline and candidate measurements with variance and a correctness guard.
-- External prior-art coverage and current target fit.
+- Target fit must be rechecked after measurements and immediately before drafting.
 - User-selected Mode and Target.
 
 ## Resume
@@ -68,8 +70,26 @@ Done when: Repeated runs record exact SQL, rows, latency, peak RSS, temp I/O, an
 
 ## Performance evidence
 
-Workload: Not established.
+Workload: Synthetic evaluator defined below; real-world representativeness is not established.
 Baseline [N]: Not measured.
 Candidate [N]: No correction is implemented or measured.
 Guard [N]: Existing result-equivalence and fault tests have not run for a candidate.
 Boundary [N]: Peak ephemeral storage, temp I/O, latency, and end-to-end impact remain unmeasured.
+
+### Benchmark plan
+
+Baseline: current Source commit `upstream/master@f17a2ee06b2ba5e65528aa3e0e3f2508c75987fb`.
+Candidate: isolated worktree at that base with only the proposed unbounded-start `first_value()` retention correction.
+Environment: Ubuntu 24.04.4, AMD Ryzen 9 5950X, GCC 13.3.0; compile with `-O2 -DNDEBUG -g -fno-omit-frame-pointer`.
+Isolation: one fresh dedicated process and connection per sample, pinned with `taskset -c 4`; no concurrent SQLite work.
+Workload: temporary on-disk `t(id INTEGER PRIMARY KEY,payload BLOB)` with deterministic unique 256-byte payloads; N=10k,30k,100k,300k,1m.
+Settings: `PRAGMA temp_store=MEMORY; PRAGMA cache_size=-2048; PRAGMA mmap_size=0;`.
+SQL: `SELECT first_value(payload) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t WHERE id <= ?1;`.
+Plan [N]: setup and prepare are untimed; `?1` equals N; verify EQP has no independent sorter before every measured series.
+Primary [N]: reset `SQLITE_STATUS_MEMORY_USED` high-water immediately before stepping; record high-water minus current memory at reset.
+Protocol [N]: three warmups per build and N, then 15 paired samples alternating AB/BA (eight AB, seven BA), pinned to CPU 4.
+Analysis [N]: report median candidate/baseline ratio and MAD; collect `perf stat` counters and Max RSS as secondary measures.
+Acceptance [N]: report only if the candidate reduces the 1m peak delta by >=80%, has a <=0.25 memory-scaling exponent, regresses runtime by <=3%, and returns the exact expected payload for every row.
+Exponent [N]: ordinary-least-squares slope of `log2(max(1, median peak delta))` against `log2(N)` across the five N values.
+Guards [N]: compare `ROWS`, `RANGE`, and `GROUPS`; empty and `NULL` frames; `EXCLUDE`; mixed `nth_value()`, `lead()`, and `lag()`; then `window3`, `windowfault`, and `devtest`.
+Stop [N]: stop rather than report if baseline memory scaling is outside 0.75–1.25, EQP shows an independent sorter, or another SQLite connection confounds the status counter.
