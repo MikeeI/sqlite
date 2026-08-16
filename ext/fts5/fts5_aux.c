@@ -123,27 +123,30 @@ struct HighlightContext {
   int iPos;                       /* Current token offset in zIn[] */
   int iOff;                       /* Have copied up to this offset in zIn[] */
   int bOpen;                      /* True if highlight is open */
-  char *zOut;                     /* Output value */
+  sqlite3_str *pOut;              /* Output builder */
 };
 
 /*
-** Append text to the HighlightContext output string - p->zOut. Argument
-** z points to a buffer containing n bytes of text to append. If n is 
-** negative, everything up until the first '\0' is appended to the output.
+** Append text to the HighlightContext output builder. Argument z points to
+** a buffer containing n bytes of text to append. If n is negative, append
+** everything up until the first '\0'.
 **
-** If *pRc is set to any value other than SQLITE_OK when this function is 
-** called, it is a no-op. If an error (i.e. an OOM condition) is encountered, 
-** *pRc is set to an error code before returning. 
+** If *pRc is set to any value other than SQLITE_OK when this function is
+** called, it is a no-op. If an error is encountered, *pRc is set to that
+** error before returning.
 */
 static void fts5HighlightAppend(
-  int *pRc, 
-  HighlightContext *p, 
+  int *pRc,
+  HighlightContext *p,
   const char *z, int n
 ){
   if( *pRc==SQLITE_OK && z ){
-    if( n<0 ) n = (int)strlen(z);
-    p->zOut = sqlite3_mprintf("%z%.*s", p->zOut, n, z);
-    if( p->zOut==0 ) *pRc = SQLITE_NOMEM;
+    if( n<0 ){
+      sqlite3_str_appendall(p->pOut, z);
+    }else{
+      sqlite3_str_append(p->pOut, z, n);
+    }
+    *pRc = sqlite3_str_errcode(p->pOut);
   }
 }
 
@@ -240,6 +243,7 @@ static void fts5HighlightFunction(
   HighlightContext ctx;
   int rc;
   int iCol;
+  char *zOut;
 
   if( nVal!=3 ){
     const char *zErr = "wrong number of arguments to function highlight()";
@@ -259,6 +263,8 @@ static void fts5HighlightFunction(
   }else if( ctx.zIn ){
     const char *pLoc = 0;         /* Locale of column iCol */
     int nLoc = 0;                 /* Size of pLoc in bytes */
+    ctx.pOut = sqlite3_str_new(0);
+    if( ctx.pOut==0 && rc==SQLITE_OK ) rc = SQLITE_NOMEM;
     if( rc==SQLITE_OK ){
       rc = fts5CInstIterInit(pApi, pFts, iCol, &ctx.iter);
     }
@@ -276,10 +282,19 @@ static void fts5HighlightFunction(
     }
     fts5HighlightAppend(&rc, &ctx, &ctx.zIn[ctx.iOff], ctx.nIn - ctx.iOff);
 
-    if( rc==SQLITE_OK ){
-      sqlite3_result_text(pCtx, (const char*)ctx.zOut, -1, SQLITE_TRANSIENT);
+    if( ctx.pOut ){
+      zOut = sqlite3_str_finish(ctx.pOut);
+      ctx.pOut = 0;
+      if( rc==SQLITE_OK ){
+        if( zOut ){
+          sqlite3_result_text(pCtx, zOut, -1, sqlite3_free);
+        }else{
+          sqlite3_result_text(pCtx, "", 0, SQLITE_STATIC);
+        }
+      }else{
+        sqlite3_free(zOut);
+      }
     }
-    sqlite3_free(ctx.zOut);
   }
   if( rc!=SQLITE_OK ){
     sqlite3_result_error_code(pCtx, rc);
@@ -437,6 +452,7 @@ static void fts5SnippetFunction(
   int nColSize = 0;               /* Total size of iBestCol in tokens */
   Fts5SFinder sFinder;            /* Used to find the beginnings of sentences */
   int nCol;
+  char *zOut;
 
   if( nVal!=5 ){
     const char *zErr = "wrong number of arguments to function snippet()";
@@ -538,6 +554,8 @@ static void fts5SnippetFunction(
   if( ctx.zIn ){
     const char *pLoc = 0;         /* Locale of column iBestCol */
     int nLoc = 0;                 /* Bytes in pLoc */
+    ctx.pOut = sqlite3_str_new(0);
+    if( ctx.pOut==0 && rc==SQLITE_OK ) rc = SQLITE_NOMEM;
 
     if( rc==SQLITE_OK ){
       rc = fts5CInstIterInit(pApi, pFts, iBestCol, &ctx.iter);
@@ -573,12 +591,24 @@ static void fts5SnippetFunction(
       fts5HighlightAppend(&rc, &ctx, zEllips, -1);
     }
   }
-  if( rc==SQLITE_OK ){
-    sqlite3_result_text(pCtx, (const char*)ctx.zOut, -1, SQLITE_TRANSIENT);
-  }else{
+  if( ctx.pOut ){
+    zOut = sqlite3_str_finish(ctx.pOut);
+    ctx.pOut = 0;
+    if( rc==SQLITE_OK ){
+      if( zOut ){
+        sqlite3_result_text(pCtx, zOut, -1, sqlite3_free);
+      }else{
+        sqlite3_result_text(pCtx, "", 0, SQLITE_STATIC);
+      }
+    }else{
+      sqlite3_free(zOut);
+    }
+  }else if( rc==SQLITE_OK ){
+    sqlite3_result_text(pCtx, 0, -1, SQLITE_TRANSIENT);
+  }
+  if( rc!=SQLITE_OK ){
     sqlite3_result_error_code(pCtx, rc);
   }
-  sqlite3_free(ctx.zOut);
   sqlite3_free(aSeen);
   sqlite3_free(sFinder.aFirst);
 }
