@@ -26,7 +26,8 @@
 #define FNV_PRIME UINT64_C(1099511628211)
 
 static const char zSampleSql[] =
-  "SELECT first_value(payload) OVER (ORDER BY id) "
+  "SELECT first_value(payload) OVER (ORDER BY id "
+  "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) "
   "FROM t WHERE id<=?1 ORDER BY id";
 
 static volatile uint64_t benchChecksum = FNV_OFFSET;
